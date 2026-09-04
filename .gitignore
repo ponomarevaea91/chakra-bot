@@ -1,4 +1,6 @@
 .env
-chakra_bot.db
-reports/*.pdf
 __pycache__/
+*.py[cod]
+*.db
+reports/
+*.pdf

@@ -8,73 +8,31 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-REPORTS_DIR = os.path.join(BASE_DIR, "reports")
+DATA_DIR = os.getenv("DATA_DIR", BASE_DIR)
+REPORTS_DIR = os.path.join(DATA_DIR, "reports")
 FONTS_DIR = os.path.join(BASE_DIR, "fonts")
-
 REGULAR_FONT = "DejaVuSans"
 BOLD_FONT = "DejaVuSans-Bold"
 
-
 def register_fonts():
-    """Registers bundled Unicode fonts so Cyrillic is displayed correctly in PDFs."""
-    if REGULAR_FONT not in pdfmetrics.getRegisteredFontNames():
-        pdfmetrics.registerFont(
-            TTFont(REGULAR_FONT, os.path.join(FONTS_DIR, "DejaVuSans.ttf"))
-        )
-    if BOLD_FONT not in pdfmetrics.getRegisteredFontNames():
-        pdfmetrics.registerFont(
-            TTFont(BOLD_FONT, os.path.join(FONTS_DIR, "DejaVuSans-Bold.ttf"))
-        )
+    regular = os.path.join(FONTS_DIR, "DejaVuSans.ttf")
+    bold = os.path.join(FONTS_DIR, "DejaVuSans-Bold.ttf")
+    if not os.path.isfile(regular) or not os.path.isfile(bold):
+        raise FileNotFoundError(f"Шрифты PDF не найдены. Ожидаются: {regular} и {bold}")
+    if REGULAR_FONT not in pdfmetrics.getRegisteredFontNames(): pdfmetrics.registerFont(TTFont(REGULAR_FONT, regular))
+    if BOLD_FONT not in pdfmetrics.getRegisteredFontNames(): pdfmetrics.registerFont(TTFont(BOLD_FONT, bold))
 
-
-def create_report(uid, name, num, ch, rid):
-    register_fonts()
-    os.makedirs(REPORTS_DIR, exist_ok=True)
+def create_report(uid, name, num, ch, rid, energy_scores=None, sphere_analysis=None):
+    register_fonts(); os.makedirs(REPORTS_DIR, exist_ok=True)
     path = os.path.join(REPORTS_DIR, f"report_{uid}_{rid}.pdf")
-
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        "ReportTitle",
-        parent=styles["Title"],
-        fontName=BOLD_FONT,
-        alignment=TA_CENTER,
-        fontSize=25,
-        leading=32,
-        spaceAfter=12,
-    )
-    heading_style = ParagraphStyle(
-        "ReportHeading",
-        parent=styles["Heading1"],
-        fontName=BOLD_FONT,
-        fontSize=18,
-        leading=24,
-        spaceBefore=8,
-        spaceAfter=8,
-    )
-    body_style = ParagraphStyle(
-        "ReportBody",
-        parent=styles["BodyText"],
-        fontName=REGULAR_FONT,
-        fontSize=10.5,
-        leading=16,
-        spaceAfter=6,
-    )
-
+    title = ParagraphStyle("ReportTitle", parent=styles["Title"], fontName=BOLD_FONT, alignment=TA_CENTER, fontSize=22, leading=28, spaceAfter=12)
+    heading = ParagraphStyle("ReportHeading", parent=styles["Heading1"], fontName=BOLD_FONT, fontSize=16, leading=21, spaceBefore=8, spaceAfter=8)
+    body = ParagraphStyle("ReportBody", parent=styles["BodyText"], fontName=REGULAR_FONT, fontSize=10.5, leading=16, spaceAfter=6)
     story = []
-    image_path = os.path.join(BASE_DIR, "images", f"chakra_{num}.jpg")
-    if os.path.exists(image_path):
-        story.append(Image(image_path, width=10 * cm, height=10 * cm))
-
-    story += [
-        Spacer(1, 1 * cm),
-        Paragraph("ПЕРСОНАЛЬНЫЙ ЭНЕРГЕТИЧЕСКИЙ ОТЧЁТ", title_style),
-        Spacer(1, 1 * cm),
-        Paragraph(name or "Пользователь", body_style),
-        Paragraph(ch["name"], heading_style),
-        Paragraph(ch["question"], body_style),
-        PageBreak(),
-    ]
-
+    image_path = os.path.join(BASE_DIR, "images", "chakras", f"{num:02d}_{['muladhara','svadhisthana','manipura','anahata','vishuddha','ajna','sahasrara'][num-1]}.jpg")
+    if os.path.exists(image_path): story.append(Image(image_path, width=9*cm, height=9*cm))
+    story += [Spacer(1, .5*cm), Paragraph("ПЕРСОНАЛЬНЫЙ ЭНЕРГЕТИЧЕСКИЙ ОТЧЁТ", title), Paragraph(name or "Пользователь", body), Paragraph(ch["name"], heading), Paragraph(ch["question"], body), PageBreak()]
     sections = [
         ("О вашей ведущей чакре", [ch["responsibility"]]),
         ("Сильные стороны", ch["strengths"]),
@@ -82,37 +40,23 @@ def create_report(uid, name, num, ch, rid):
         ("Что может мешать доходу", ch["money_risks"] if isinstance(ch["money_risks"], list) else [ch["money_risks"]]),
         ("Подходящие направления и профессии", ch["professions"]),
         ("Что лучше избегать", [ch["avoid"]]),
-        ("Когда чакра уходит в минус", [ch["minus"]]),
+        ("Когда чакра уходит в минус", ch["minus"]),
         ("Как вернуть чакру в ресурс и плюс", ch["recovery"]),
-        ("Качества состояния в плюсе", ch["strengths"]),
     ]
-
     for section_title, items in sections:
-        story.append(Paragraph(section_title, heading_style))
-        for item in items:
-            story.append(Paragraph("• " + str(item), body_style))
-        story.append(Spacer(1, 0.5 * cm))
-
-    story += [
-        PageBreak(),
-        Paragraph("Важно", heading_style),
-        Paragraph(
-            "Материалы отчёта основаны на предоставленной методике и предназначены "
-            "для саморефлексии. Они не являются медицинской, психологической или "
-            "финансовой диагностикой.",
-            body_style,
-        ),
-    ]
-
-    document = SimpleDocTemplate(
-        path,
-        pagesize=A4,
-        leftMargin=2 * cm,
-        rightMargin=2 * cm,
-        topMargin=2 * cm,
-        bottomMargin=2 * cm,
-        title="Персональный энергетический отчёт",
-        author="Chakra Bot",
-    )
-    document.build(story)
+        story.append(Paragraph(section_title, heading))
+        for item in items: story.append(Paragraph("• " + str(item), body))
+        story.append(Spacer(1, .35*cm))
+    if energy_scores:
+        story += [PageBreak(), Paragraph("ВАША ЭНЕРГОКАРТА", title)]
+        names = ["Чакра 1","Чакра 2","Чакра 3","Чакра 4","Чакра 5","Чакра 6","Чакра 7"]
+        for i in range(1,8): story.append(Paragraph(f"<b>{names[i-1]}</b>: {energy_scores.get(i,0)}/5", body))
+    if sphere_analysis:
+        story.append(Paragraph("АНАЛИЗ СФЕР ЖИЗНИ", title))
+        labels = {"health":"Здоровье и ресурс", "relationships":"Отношения", "money":"Деньги и реализация"}
+        for key in ("health","relationships","money"):
+            item = sphere_analysis[key]
+            story.append(Paragraph(f"<b>{labels[key]}</b>: {item['score']}/5 — {item['level']}", body))
+    story += [PageBreak(), Paragraph("Важно", heading), Paragraph("Материалы отчёта предназначены для саморефлексии и не являются медицинской, психологической или финансовой диагностикой.", body)]
+    SimpleDocTemplate(path, pagesize=A4, leftMargin=2*cm, rightMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm, title="Персональный энергетический отчёт").build(story)
     return path
