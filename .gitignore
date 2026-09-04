@@ -1,0 +1,4 @@
+.env
+chakra_bot.db
+reports/*.pdf
+__pycache__/
