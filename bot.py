@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import telebot
 from telebot import types
 
-from data import CHAKRAS, QUESTIONS, ENERGY_QUESTIONS, ENERGY_LEVELS
+from data import CHAKRAS, QUESTIONS, ENERGY_QUESTIONS, ENERGY_LEVELS, CHAKRA_GUIDANCE
 from database import *
 from report_generator import create_report
 from analysis_service import sphere_text, analyze_spheres
@@ -50,7 +50,7 @@ def result_buttons(result_id):
     return markup
 
 
-def short_label(text, limit=52):
+def short_label(text, limit=38):
     text = text.strip()
     if len(text) <= limit:
         return text
@@ -59,14 +59,31 @@ def short_label(text, limit=52):
 
 
 def chakra_recommendations(chakra):
-    return (
-        f"🌿 <b>Как перевести {chakra['name']} из минуса в плюс</b>\n\n"
-        "<b>Признаки минуса:</b>\n" + "\n".join(f"• {item}" for item in chakra["minus"])
-        + "\n\n<b>Практика восстановления:</b>\n" + "\n".join(f"✓ {item}" for item in chakra["recovery"])
-        + "\n\n<b>Смысл движения в плюс:</b>\n"
-        + f"Развивать качества: {', '.join(chakra['strengths'][:3]).lower()}.\n\n"
-        + "Начните с одного небольшого действия в день и наблюдайте за своим состоянием."
-    )
+    # Расширенные рекомендации по методичке «День 1», страницы 18–38.
+    num = next((n for n, item in CHAKRAS.items() if item is chakra), None)
+    if num is None:
+        num = next((n for n, item in CHAKRAS.items() if item["name"] == chakra["name"]), 1)
+    g = CHAKRA_GUIDANCE[num]
+    parts = [
+        f"🌿 <b>Как вывести {chakra['name']} в плюс</b>",
+        "",
+        f"<b>Как это может проявляться:</b>\n{g['recognition']}",
+        "",
+        "<b>❤️ Здоровье и ресурс</b>",
+        *[f"• {x}" for x in g["health"]],
+        "",
+        "<b>🤝 Отношения</b>",
+        *[f"• {x}" for x in g["relationships"]],
+        "",
+        "<b>💰 Деньги и реализация</b>",
+        *[f"• {x}" for x in g["money"]],
+        "",
+        "<b>Сильные стороны</b>",
+        *[f"• {x}" for x in chakra["strengths"][:4]],
+        "",
+        "<i>Начните с одного-двух действий. Это инструмент саморефлексии, а не медицинская, психологическая или финансовая диагностика.</i>",
+    ]
+    return "\n".join(parts)
 
 
 @bot.message_handler(commands=["start"])
@@ -230,60 +247,28 @@ def life_spheres(message):
 # ---------------- PDF ----------------
 def send_report(chat_id, user_id, result_id, name):
     result = get_result(user_id, result_id)
-    if not result: return bot.send_message(chat_id, "Результат не найден.")
+    if not result:
+        return bot.send_message(chat_id, "Результат не найден.")
     energy_row = get_last_energy_map(user_id)
     energy_scores = None
     if energy_row:
         energy_scores = {int(k): float(v) for k, v in json.loads(energy_row[1]).items()}
-    path = create_report(user_id, name or "Пользователь", result[1], CHAKRAS[result[1]], result_id, energy_scores, analyze_spheres(energy_scores) if energy_scores else None)
+    path = create_report(
+        user_id, name or "Пользователь", result[1], CHAKRAS[result[1]], result_id,
+        energy_scores, analyze_spheres(energy_scores) if energy_scores else None
+    )
     save_report(user_id, result_id, path)
-    with open(path, "rb") as f: bot.send_document(chat_id, f, caption="💎 Ваш персональный расширенный отчёт")
-
+    with open(path, "rb") as f:
+        bot.send_document(chat_id, f, caption="📘 Ваш расширенный персональный отчёт")
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("pdf:"))
 def pdf(call):
-    """Создаёт и отправляет расширенный PDF без оплаты."""
     result_id = int(call.data.split(":")[1])
-    bot.answer_callback_query(call.id, "Создаю ваш расширенный PDF…")
+    bot.answer_callback_query(call.id)
     try:
-        send_report(
-            call.message.chat.id,
-            call.from_user.id,
-            result_id,
-            call.from_user.first_name
-        )
+        send_report(call.message.chat.id, call.from_user.id, result_id, call.from_user.first_name)
     except Exception as error:
-        bot.send_message(
-            call.message.chat.id,
-            f"Ошибка создания PDF: {error}"
-        )
-
-
-@bot.message_handler(func=lambda m: m.text == "💎 Мои отчёты")
-def reports(message):
-    """Показывает все результаты, для которых можно получить PDF бесплатно."""
-    rows = history(message.from_user.id)
-    if not rows:
-        return bot.send_message(
-            message.chat.id,
-            "Пока нет результатов. Сначала пройдите тест, чтобы получить расширенный PDF."
-        )
-
-    markup = types.InlineKeyboardMarkup()
-    for result_id, chakra_number, created_at in rows:
-        markup.add(
-            types.InlineKeyboardButton(
-                f"💎 {CHAKRAS[chakra_number]['name']} — {created_at[:10]}",
-                callback_data=f"pdf:{result_id}"
-            )
-        )
-
-    bot.send_message(
-        message.chat.id,
-        "💎 Выберите результат — расширенный PDF создаётся бесплатно:",
-        reply_markup=markup
-    )
-
+        bot.send_message(call.message.chat.id, f"Ошибка создания PDF: {error}")
 
 # ---------------- ИСТОРИЯ, ВОРОНКА, КОНСУЛЬТАЦИЯ ----------------
 @bot.message_handler(func=lambda m: m.text == "📜 История")

@@ -1,4 +1,4 @@
-from data import CHAKRAS
+from data import CHAKRAS, CHAKRA_GUIDANCE
 
 SPHERE_RULES = {
     "health": {1: 0.22, 2: 0.16, 3: 0.18, 4: 0.14, 5: 0.08, 6: 0.10, 7: 0.12},
@@ -10,12 +10,6 @@ SPHERE_TITLES = {
     "health": "❤️ Здоровье и ресурс",
     "relationships": "🤝 Отношения",
     "money": "💰 Деньги и реализация",
-}
-
-SPHERE_ADVICE = {
-    "health": "Поддерживайте базовый режим, отдых и бережное отношение к телу. Этот блок — инструмент саморефлексии и не заменяет медицинскую диагностику.",
-    "relationships": "Обратите внимание на взаимность, границы и способность прямо говорить о своих чувствах и потребностях.",
-    "money": "Посмотрите, где можно добавить структуру, ясность ценности, спокойное называние цены и регулярные действия.",
 }
 
 def level(score):
@@ -46,11 +40,14 @@ def sphere_text(scores):
         item = analyses[sphere]
         weak = ", ".join(CHAKRAS[c]["name"] for c in item["weakest"])
         strong = ", ".join(CHAKRAS[c]["name"] for c in item["strongest"])
+        guidance = CHAKRA_GUIDANCE[item["weakest"][0]]
+        sphere_guidance = guidance[sphere]
         lines += [
             f"\n<b>{SPHERE_TITLES[sphere]}</b>: {item['score']}/5 — {item['level']}",
             f"Опора: {strong}.",
-            f"Внимание: {weak}.",
-            SPHERE_ADVICE[sphere],
+            f"Зона внимания: {weak}.",
+            "<b>Что делать:</b>",
+            *[f"• {x}" for x in sphere_guidance[:2]],
         ]
     lines.append("\n<i>Это саморефлексивный анализ, а не медицинская, психологическая или финансовая диагностика.</i>")
     return "\n".join(lines)
