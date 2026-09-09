@@ -121,10 +121,30 @@ def ask(chat_id, user_id):
         return
 
     question = QUESTIONS[session["i"]]
-    markup = types.InlineKeyboardMarkup()
-    for option in question["options"]:
-        markup.add(types.InlineKeyboardButton(short_label(option["text"]), callback_data=f"a:{option['chakra']}"))
-    bot.send_message(chat_id, f"🔮 <b>Вопрос {session['i'] + 1}/{len(QUESTIONS)}</b>\n\n{question['question']}", parse_mode="HTML", reply_markup=markup)
+
+    # Варианты ответа показываем полностью в тексте вопроса,
+    # а на кнопках оставляем только буквенные обозначения.
+    letters = ["А", "Б", "В", "Г", "Д", "Е", "Ж"]
+    options_text = "\n".join(
+        f"<b>{letters[index]}.</b> {option['text']}"
+        for index, option in enumerate(question["options"])
+    )
+    text = (
+        f"🔮 <b>Вопрос {session['i'] + 1}/{len(QUESTIONS)}</b>\n\n"
+        f"{question['question']}\n\n"
+        f"{options_text}\n\n"
+        "<i>Выберите букву своего ответа:</i>"
+    )
+
+    markup = types.InlineKeyboardMarkup(row_width=4)
+    buttons = [
+        types.InlineKeyboardButton(letters[index], callback_data=f"a:{option['chakra']}")
+        for index, option in enumerate(question["options"])
+    ]
+    markup.add(*buttons[:4])
+    markup.add(*buttons[4:])
+
+    bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup)
 
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("a:"))
