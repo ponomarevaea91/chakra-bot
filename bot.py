@@ -1,5 +1,6 @@
 import os
 import json
+import html
 from collections import Counter, defaultdict
 from dotenv import load_dotenv
 import telebot
@@ -68,7 +69,7 @@ def chakra_recommendations(chakra):
         num = next((n for n, item in CHAKRAS.items() if item["name"] == chakra["name"]), 1)
     g = CHAKRA_GUIDANCE[num]
     parts = [
-        f"🌿 <b>Как вывести {chakra['name']} в плюс</b>",
+        f"🌿 <b>Как вывести {html.escape(chakra['name'])} в плюс</b>",
         "",
         f"<b>Как это может проявляться:</b>\n{g['recognition']}",
         "",
@@ -170,19 +171,24 @@ def receive_client_name(message):
     client_name = raw.strip()
     gender = detect_gender(client_name)
     result_id = name_sessions.pop(message.from_user.id)
+    # Гарантируем наличие строки пользователя перед сохранением профиля.
+    save_user(message.from_user)
     save_client_profile(message.from_user.id, client_name, gender)
     result = get_result(message.from_user.id, result_id)
     chakra = CHAKRAS[result[1]]
     gender_label = "женский" if gender == "female" else "мужской" if gender == "male" else "универсальный"
     bot.send_message(
         message.chat.id,
-        f"💫 Имя сохранено: <b>{client_name}</b>\n"
+        f"💫 Имя сохранено: <b>{html.escape(client_name)}</b>\n"
         f"Титульный лист: <b>{gender_label}</b> вариант.\n\n"
-        f"Ведущая чакра: <b>{chakra['name']}</b>.\n\n"
-        "Теперь пройдите 🗺 <b>Энергокарту</b>. После неё бот автоматически соберёт ваш персональный PDF по результатам обоих этапов.",
+        f"Ведущая чакра: <b>{html.escape(chakra['name'])}</b>.\n\n"
+        "Сейчас автоматически запускаю 🗺 <b>Энергокарту</b>. Вам не нужно заново нажимать кнопку. После 21 ответа бот автоматически соберёт персональный PDF.",
         parse_mode="HTML",
-        reply_markup=result_buttons(result_id, include_pdf=False)
+        reply_markup=menu()
     )
+    # Надёжный переход: сразу запускаем энергокарту после сохранения имени.
+    # Это устраняет зависимость от состояния reply-клавиатуры/повторного нажатия кнопки.
+    start_energy_map(message)
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("a:"))
 def answer(call):
@@ -242,9 +248,11 @@ def start_energy_map(message):
     latest_test = get_last(message.from_user.id)
     if not latest_test:
         return bot.send_message(message.chat.id, "Сначала пройдите 🔮 тест на ведущую чакру.")
+    # Энергокарта не должна блокироваться из-за профиля имени.
+    # Имя нужно для PDF, но саму энергокарту можно пройти в любой момент
+    # после завершения теста. Если профиль не сохранился после сбоя/перезапуска,
+    # отчёт использует сохранённое имя или Telegram first_name как запасной вариант.
     profile = get_client_profile(message.from_user.id)
-    if not profile or not profile[0]:
-        return bot.send_message(message.chat.id, "Сначала завершите тест и укажите имя клиента — оно попадёт на титульный лист PDF.")
     energy_sessions[message.from_user.id] = {"i": 0, "answers": [], "result_id": latest_test[0]}
     bot.send_message(message.chat.id,
         "🗺 <b>Личная энергокарта</b>\n\n21 утверждение: по 3 для каждой чакры. Оценивайте от 1 до 5.\n\n1 — совсем не про меня\n5 — полностью про меня\n\nЭто инструмент саморефлексии.", parse_mode="HTML")
