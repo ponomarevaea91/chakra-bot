@@ -9,6 +9,7 @@ from data import CHAKRAS, QUESTIONS, ENERGY_QUESTIONS, ENERGY_LEVELS, CHAKRA_GUI
 from database import *
 from report_generator import create_report
 from analysis_service import sphere_text, analyze_spheres
+from gender_service import detect_gender, normalize_name
 from funnel_service import FUNNEL_MESSAGES
 
 load_dotenv()
@@ -23,6 +24,7 @@ bot = telebot.TeleBot(TOKEN)
 create_tables()
 sessions = {}
 energy_sessions = {}
+name_sessions = {}
 
 
 def menu():
@@ -41,11 +43,12 @@ def consultation_button():
     return markup
 
 
-def result_buttons(result_id):
+def result_buttons(result_id, include_pdf=False):
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("🌿 Как вывести в плюс", callback_data=f"plus:{result_id}"))
-    markup.add(types.InlineKeyboardButton("💎 Расширенный PDF", callback_data=f"pdf:{result_id}"))
     markup.add(types.InlineKeyboardButton("📖 Подробнее", callback_data=f"detail:{result_id}"))
+    if include_pdf:
+        markup.add(types.InlineKeyboardButton("💎 Сформировать PDF", callback_data=f"pdf:{result_id}"))
     markup.add(types.InlineKeyboardButton("📅 Консультация", url=INSTAGRAM_URL))
     return markup
 
@@ -110,13 +113,16 @@ def ask(chat_id, user_id):
         chakra_number = max(leaders)
         result_id = save_result(user_id, chakra_number, dict(scores))
         del sessions[user_id]
+        name_sessions[user_id] = result_id
         chakra = CHAKRAS[chakra_number]
         text = (f"✨ <b>Ваш результат: {chakra['name']}</b>\n"
                 f"📍 {chakra['location']}\n"
                 f"❓ «{chakra['question']}»\n\n"
                 f"{chakra['responsibility']}\n\n"
-                "🌿 Нажмите «Как вывести в плюс», чтобы получить рекомендации.")
-        bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=result_buttons(result_id))
+                "Теперь напишите, пожалуйста, <b>имя клиента</b>, которое должно появиться на титульном листе PDF.\n"
+                "Например: <b>Елена</b> или <b>Александр</b>.\n\n"
+                "По имени бот автоматически определит вариант титульного листа.")
+        bot.send_message(chat_id, text, parse_mode="HTML")
         set_funnel_step(user_id, 1)
         return
 
@@ -146,6 +152,32 @@ def ask(chat_id, user_id):
 
     bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup)
 
+
+@bot.message_handler(func=lambda m: m.from_user.id in name_sessions)
+def receive_client_name(message):
+    raw = (message.text or "").strip()
+    if raw in {"🔮 Пройти тест", "🗺 Энергокарта", "📊 Мой результат", "🌿 Рекомендации", "❤️ Сферы жизни", "📜 История", "💎 Мои отчёты", "📅 Консультация", "ℹ️ О методике"}:
+        return bot.send_message(message.chat.id, "Сначала укажите имя клиента — оно будет напечатано на титульном листе PDF.")
+    cleaned = normalize_name(raw)
+    if not cleaned:
+        return bot.send_message(message.chat.id, "Пожалуйста, напишите имя ещё раз — например, «Елена» или «Александр».")
+    # Берём первое слово как имя клиента; полная строка всё равно сохраняется в профиле.
+    client_name = raw.strip()
+    gender = detect_gender(client_name)
+    result_id = name_sessions.pop(message.from_user.id)
+    save_client_profile(message.from_user.id, client_name, gender)
+    result = get_result(message.from_user.id, result_id)
+    chakra = CHAKRAS[result[1]]
+    gender_label = "женский" if gender == "female" else "мужской" if gender == "male" else "универсальный"
+    bot.send_message(
+        message.chat.id,
+        f"💫 Имя сохранено: <b>{client_name}</b>\n"
+        f"Титульный лист: <b>{gender_label}</b> вариант.\n\n"
+        f"Ведущая чакра: <b>{chakra['name']}</b>.\n\n"
+        "Теперь пройдите 🗺 <b>Энергокарту</b>. После неё бот автоматически соберёт ваш персональный PDF по результатам обоих этапов.",
+        parse_mode="HTML",
+        reply_markup=result_buttons(result_id, include_pdf=False)
+    )
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith("a:"))
 def answer(call):
@@ -190,13 +222,20 @@ def last_result(message):
     result = get_last(message.from_user.id)
     if not result: return bot.send_message(message.chat.id, "Сначала пройдите тест.")
     chakra = CHAKRAS[result[1]]
-    bot.send_message(message.chat.id, f"✨ Ваш результат: {chakra['name']}\n❓ «{chakra['question']}»", reply_markup=result_buttons(result[0]))
+    has_energy = bool(get_last_energy_map(message.from_user.id))
+    bot.send_message(message.chat.id, f"✨ Ваш результат: {chakra['name']}\n❓ «{chakra['question']}»", reply_markup=result_buttons(result[0], include_pdf=has_energy))
 
 
 # ---------------- ЭНЕРГОКАРТА ----------------
 @bot.message_handler(func=lambda m: m.text == "🗺 Энергокарта")
 def start_energy_map(message):
-    energy_sessions[message.from_user.id] = {"i": 0, "answers": []}
+    latest_test = get_last(message.from_user.id)
+    if not latest_test:
+        return bot.send_message(message.chat.id, "Сначала пройдите 🔮 тест на ведущую чакру.")
+    profile = get_client_profile(message.from_user.id)
+    if not profile or not profile[0]:
+        return bot.send_message(message.chat.id, "Сначала завершите тест и укажите имя клиента — оно попадёт на титульный лист PDF.")
+    energy_sessions[message.from_user.id] = {"i": 0, "answers": [], "result_id": latest_test[0]}
     bot.send_message(message.chat.id,
         "🗺 <b>Личная энергокарта</b>\n\n21 утверждение: по 3 для каждой чакры. Оценивайте от 1 до 5.\n\n1 — совсем не про меня\n5 — полностью про меня\n\nЭто инструмент саморефлексии.", parse_mode="HTML")
     ask_energy_question(message.chat.id, message.from_user.id)
@@ -235,7 +274,8 @@ def finish_energy_map(chat_id, user_id):
     grouped = defaultdict(list)
     for chakra_number, score in session["answers"]: grouped[chakra_number].append(score)
     scores = {chakra: round(sum(values) / len(values), 2) for chakra, values in grouped.items()}
-    save_energy_map(user_id, scores); del energy_sessions[user_id]
+    result_id = session.get("result_id")
+    save_energy_map(user_id, scores, result_id=result_id); del energy_sessions[user_id]
 
     lines = ["🗺 <b>Ваша личная энергокарта</b>"]
     low = []
@@ -255,6 +295,15 @@ def finish_energy_map(chat_id, user_id):
     bot.send_message(chat_id, sphere_text(scores), parse_mode="HTML", reply_markup=consultation_button())
     set_funnel_step(user_id, 2)
 
+    # После завершения обоих этапов автоматически создаём и отправляем персональный PDF.
+    profile = get_client_profile(user_id)
+    if result_id and profile and profile[0]:
+        try:
+            bot.send_message(chat_id, "✨ Тест и энергокарта завершены. Собираю ваш персональный PDF-отчёт…")
+            send_report(chat_id, user_id, result_id, profile[0], gender=profile[1] or "unknown")
+        except Exception as error:
+            bot.send_message(chat_id, f"Не удалось автоматически собрать PDF: {error}\nВы можете повторить через кнопку «Мой результат».")
+
 
 @bot.message_handler(func=lambda m: m.text == "❤️ Сферы жизни")
 def life_spheres(message):
@@ -265,17 +314,22 @@ def life_spheres(message):
 
 
 # ---------------- PDF ----------------
-def send_report(chat_id, user_id, result_id, name):
+def send_report(chat_id, user_id, result_id, name=None, gender=None):
     result = get_result(user_id, result_id)
     if not result:
         return bot.send_message(chat_id, "Результат не найден.")
     energy_row = get_last_energy_map(user_id)
-    energy_scores = None
-    if energy_row:
-        energy_scores = {int(k): float(v) for k, v in json.loads(energy_row[1]).items()}
+    if not energy_row:
+        return bot.send_message(chat_id, "Сначала завершите 🗺 Энергокарту — только после неё можно собрать полный персональный PDF.")
+    if energy_row[3] is not None and int(energy_row[3]) != int(result_id):
+        return bot.send_message(chat_id, "Эта энергокарта относится к другому результату. Пройдите энергокарту заново после последнего теста.")
+    energy_scores = {int(k): float(v) for k, v in json.loads(energy_row[1]).items()}
+    profile = get_client_profile(user_id)
+    client_name = name or (profile[0] if profile and profile[0] else None) or "Клиент"
+    client_gender = gender or (profile[1] if profile and profile[1] else "unknown")
     path = create_report(
-        user_id, name or "Пользователь", result[1], CHAKRAS[result[1]], result_id,
-        energy_scores, analyze_spheres(energy_scores) if energy_scores else None
+        user_id, client_name, result[1], CHAKRAS[result[1]], result_id,
+        energy_scores, analyze_spheres(energy_scores), gender=client_gender
     )
     save_report(user_id, result_id, path)
     with open(path, "rb") as f:
@@ -286,7 +340,7 @@ def pdf(call):
     result_id = int(call.data.split(":")[1])
     bot.answer_callback_query(call.id)
     try:
-        send_report(call.message.chat.id, call.from_user.id, result_id, call.from_user.first_name)
+        send_report(call.message.chat.id, call.from_user.id, result_id)
     except Exception as error:
         bot.send_message(call.message.chat.id, f"Ошибка создания PDF: {error}")
 

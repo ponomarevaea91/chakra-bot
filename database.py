@@ -15,6 +15,7 @@ def create_tables():
     connection.executescript("""
         CREATE TABLE IF NOT EXISTS users(
             telegram_id INTEGER PRIMARY KEY, username TEXT, first_name TEXT,
+            client_name TEXT, gender TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS test_results(
@@ -30,7 +31,7 @@ def create_tables():
         );
         CREATE TABLE IF NOT EXISTS energy_maps(
             id INTEGER PRIMARY KEY AUTOINCREMENT, telegram_id INTEGER,
-            scores TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            result_id INTEGER, scores TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS payments(
             id INTEGER PRIMARY KEY AUTOINCREMENT, telegram_id INTEGER,
@@ -42,12 +43,44 @@ def create_tables():
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
     """)
+    # Мягкая миграция существующей базы: добавляем поля без потери данных.
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(users)").fetchall()}
+    if "client_name" not in columns:
+        connection.execute("ALTER TABLE users ADD COLUMN client_name TEXT")
+    if "gender" not in columns:
+        connection.execute("ALTER TABLE users ADD COLUMN gender TEXT")
+    energy_columns = {row[1] for row in connection.execute("PRAGMA table_info(energy_maps)").fetchall()}
+    if "result_id" not in energy_columns:
+        connection.execute("ALTER TABLE energy_maps ADD COLUMN result_id INTEGER")
     connection.commit(); connection.close()
 
 def save_user(user):
     connection = _c()
-    connection.execute("INSERT INTO users VALUES(?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(telegram_id) DO UPDATE SET username=excluded.username, first_name=excluded.first_name", (user.id, user.username, user.first_name))
+    connection.execute(
+        """INSERT INTO users(telegram_id,username,first_name,client_name,gender)
+           VALUES(?,?,?,?,NULL)
+           ON CONFLICT(telegram_id) DO UPDATE SET
+             username=excluded.username,
+             first_name=excluded.first_name""",
+        (user.id, user.username, user.first_name, None)
+    )
     connection.commit(); connection.close()
+
+def save_client_profile(uid, client_name, gender):
+    connection = _c()
+    connection.execute(
+        "UPDATE users SET client_name=?, gender=? WHERE telegram_id=?",
+        (client_name, gender, uid)
+    )
+    connection.commit(); connection.close()
+
+def get_client_profile(uid):
+    connection = _c()
+    row = connection.execute(
+        "SELECT client_name, gender, first_name FROM users WHERE telegram_id=?", (uid,)
+    ).fetchone()
+    connection.close()
+    return row
 
 def save_result(uid, chakra, scores):
     connection = _c(); cursor = connection.cursor()
@@ -69,11 +102,21 @@ def save_report(uid, result_id, path):
 def get_report(uid, result_id):
     connection = _c(); row = connection.execute("SELECT report_path FROM premium_reports WHERE telegram_id=? AND result_id=?", (uid, result_id)).fetchone(); connection.close(); return row
 
-def save_energy_map(uid, scores):
-    connection = _c(); cursor = connection.cursor(); cursor.execute("INSERT INTO energy_maps(telegram_id,scores) VALUES(?,?)", (uid, json.dumps(scores, ensure_ascii=False))); map_id = cursor.lastrowid; connection.commit(); connection.close(); return map_id
+def save_energy_map(uid, scores, result_id=None):
+    connection = _c(); cursor = connection.cursor()
+    cursor.execute(
+        "INSERT INTO energy_maps(telegram_id,result_id,scores) VALUES(?,?,?)",
+        (uid, result_id, json.dumps(scores, ensure_ascii=False))
+    )
+    map_id = cursor.lastrowid; connection.commit(); connection.close(); return map_id
 
 def get_last_energy_map(uid):
-    connection = _c(); row = connection.execute("SELECT id,scores,created_at FROM energy_maps WHERE telegram_id=? ORDER BY id DESC LIMIT 1", (uid,)).fetchone(); connection.close(); return row
+    connection = _c()
+    row = connection.execute(
+        "SELECT id,scores,created_at,result_id FROM energy_maps WHERE telegram_id=? ORDER BY id DESC LIMIT 1",
+        (uid,)
+    ).fetchone()
+    connection.close(); return row
 
 def save_payment(uid, result_id, amount, currency, status="paid"):
     connection = _c(); connection.execute("INSERT INTO payments(telegram_id,result_id,amount,currency,status) VALUES(?,?,?,?,?)", (uid, result_id, amount, currency, status)); connection.commit(); connection.close()
