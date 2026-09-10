@@ -98,7 +98,12 @@ def start(message):
 
 
 # ---------------- ТЕСТ ----------------
-@bot.message_handler(func=lambda m: m.text == "🔮 Пройти тест")
+
+@bot.message_handler(commands=["test"])
+def test_command(message):
+    test(message)
+
+@bot.message_handler(func=lambda m: m.text in ("🔮 Пройти тест", "Пройти тест"))
 def test(message):
     sessions[message.from_user.id] = {"i": 0, "scores": Counter()}
     ask(message.chat.id, message.from_user.id)
@@ -120,8 +125,8 @@ def ask(chat_id, user_id):
                 f"❓ «{chakra['question']}»\n\n"
                 f"{chakra['responsibility']}\n\n"
                 "Теперь напишите, пожалуйста, <b>имя клиента</b>, которое должно появиться на титульном листе PDF.\n"
-                "Например: <b>Елена</b> или <b>Александр</b>.\n\n"
-                "По имени бот автоматически определит вариант титульного листа.")
+                "Можно указать любое имя, фамилию или ФИО.\n\n"
+                "Оформление отчёта универсально подходит для женщин и мужчин.")
         bot.send_message(chat_id, text, parse_mode="HTML")
         set_funnel_step(user_id, 1)
         return
@@ -156,11 +161,11 @@ def ask(chat_id, user_id):
 @bot.message_handler(func=lambda m: m.from_user.id in name_sessions)
 def receive_client_name(message):
     raw = (message.text or "").strip()
-    if raw in {"🔮 Пройти тест", "🗺 Энергокарта", "📊 Мой результат", "🌿 Рекомендации", "❤️ Сферы жизни", "📜 История", "💎 Мои отчёты", "📅 Консультация", "ℹ️ О методике"}:
+    if raw in {"🔮 Пройти тест", "Пройти тест", "🗺 Энергокарта", "Энергокарта", "📊 Мой результат", "Мой результат", "🌿 Рекомендации", "Рекомендации", "❤️ Сферы жизни", "Сферы жизни", "📜 История", "История", "💎 Мои отчёты", "Мои отчёты", "📅 Консультация", "Консультация", "ℹ️ О методике", "О методике"}:
         return bot.send_message(message.chat.id, "Сначала укажите имя клиента — оно будет напечатано на титульном листе PDF.")
     cleaned = normalize_name(raw)
     if not cleaned:
-        return bot.send_message(message.chat.id, "Пожалуйста, напишите имя ещё раз — например, «Елена» или «Александр».")
+        return bot.send_message(message.chat.id, "Пожалуйста, напишите имя клиента ещё раз. Можно указать любое имя или ФИО.")
     # Берём первое слово как имя клиента; полная строка всё равно сохраняется в профиле.
     client_name = raw.strip()
     gender = detect_gender(client_name)
@@ -217,7 +222,7 @@ def detail(call):
     bot.send_message(call.message.chat.id, text, parse_mode="HTML", reply_markup=consultation_button())
 
 
-@bot.message_handler(func=lambda m: m.text == "📊 Мой результат")
+@bot.message_handler(func=lambda m: m.text in ("📊 Мой результат", "Мой результат"))
 def last_result(message):
     result = get_last(message.from_user.id)
     if not result: return bot.send_message(message.chat.id, "Сначала пройдите тест.")
@@ -227,7 +232,12 @@ def last_result(message):
 
 
 # ---------------- ЭНЕРГОКАРТА ----------------
-@bot.message_handler(func=lambda m: m.text == "🗺 Энергокарта")
+
+@bot.message_handler(commands=["energy", "energymap"])
+def energy_command(message):
+    start_energy_map(message)
+
+@bot.message_handler(func=lambda m: m.text in ("🗺 Энергокарта", "Энергокарта"))
 def start_energy_map(message):
     latest_test = get_last(message.from_user.id)
     if not latest_test:
@@ -305,7 +315,7 @@ def finish_energy_map(chat_id, user_id):
             bot.send_message(chat_id, f"Не удалось автоматически собрать PDF: {error}\nВы можете повторить через кнопку «Мой результат».")
 
 
-@bot.message_handler(func=lambda m: m.text == "❤️ Сферы жизни")
+@bot.message_handler(func=lambda m: m.text in ("❤️ Сферы жизни", "Сферы жизни"))
 def life_spheres(message):
     row = get_last_energy_map(message.from_user.id)
     if not row: return bot.send_message(message.chat.id, "Сначала пройдите 🗺 Энергокарту — тогда я смогу сформировать анализ трёх сфер.")
@@ -344,8 +354,24 @@ def pdf(call):
     except Exception as error:
         bot.send_message(call.message.chat.id, f"Ошибка создания PDF: {error}")
 
+@bot.message_handler(func=lambda m: m.text in ("💎 Мои отчёты", "Мои отчёты"))
+def my_reports(message):
+    result = get_last(message.from_user.id)
+    if not result:
+        return bot.send_message(message.chat.id, "Сначала пройдите 🔮 тест.")
+    report_row = get_report(message.from_user.id, result[0])
+    if report_row and report_row[0] and os.path.exists(report_row[0]):
+        with open(report_row[0], "rb") as f:
+            return bot.send_document(message.chat.id, f, caption="📘 Ваш последний персональный отчёт")
+    if not get_last_energy_map(message.from_user.id):
+        return bot.send_message(message.chat.id, "Полный отчёт появится автоматически после завершения 🗺 Энергокарты.")
+    try:
+        send_report(message.chat.id, message.from_user.id, result[0])
+    except Exception as error:
+        bot.send_message(message.chat.id, f"Не удалось открыть отчёт: {error}")
+
 # ---------------- ИСТОРИЯ, ВОРОНКА, КОНСУЛЬТАЦИЯ ----------------
-@bot.message_handler(func=lambda m: m.text == "📜 История")
+@bot.message_handler(func=lambda m: m.text in ("📜 История", "История"))
 def show_history(message):
     rows = history(message.from_user.id)
     if not rows: return bot.send_message(message.chat.id, "История пока пуста.")
@@ -355,7 +381,7 @@ def show_history(message):
     bot.send_message(message.chat.id, "📜 История результатов:", reply_markup=markup)
 
 
-@bot.message_handler(func=lambda m: m.text == "📅 Консультация")
+@bot.message_handler(func=lambda m: m.text in ("📅 Консультация", "Консультация"))
 def consultation(message):
     bot.send_message(message.chat.id, "📅 Запись на консультацию к энерготерапевту:", reply_markup=consultation_button())
 
@@ -366,7 +392,7 @@ def funnel(message):
     bot.send_message(message.chat.id, "Если хотите разобрать результат глубже — можно записаться на консультацию.", reply_markup=consultation_button())
 
 
-@bot.message_handler(func=lambda m: m.text == "ℹ️ О методике")
+@bot.message_handler(func=lambda m: m.text in ("ℹ️ О методике", "О методике"))
 def about(message):
     bot.send_message(message.chat.id,
         "Методика использует два инструмента саморефлексии:\n\n🔮 Тест на ведущую чакру — показывает наиболее выраженную тему.\n🗺 Энергокарта — помогает оценить субъективное состояние всех 7 чакр по шкале 1–5.\n\nМатериалы не являются медицинской, психологической или финансовой диагностикой.")

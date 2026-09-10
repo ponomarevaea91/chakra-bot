@@ -142,8 +142,8 @@ def _cover_page(background_path, chakra_image_path, client_name, gender, chakra)
         c.setFont(BOLD_FONT, 26)
         c.drawCentredString(w/2,3.25*cm,client_name)
         c.setFont(REGULAR_FONT, 10)
-        label = "Женский профиль" if gender=="female" else "Мужской профиль" if gender=="male" else "Персональный профиль"
-        c.drawCentredString(w/2,2.45*cm,label)
+        # Универсальная формулировка: один и тот же отчёт подходит для женщин и мужчин.
+        c.drawCentredString(w/2,2.45*cm,"Персональный профиль")
         c.setFont(REGULAR_FONT, 8)
         c.setFillColor(colors.Color(1,1,1,alpha=0.88))
         c.drawCentredString(w/2,1.35*cm,"Материал предназначен для саморефлексии и не является медицинской,")
@@ -188,7 +188,7 @@ def create_report(uid, name, num, ch, rid, energy_scores=None, sphere_analysis=N
     center=ParagraphStyle("C",parent=body,alignment=TA_CENTER)
 
     chakra_image=os.path.join(ASSETS_DIR,"chakras",f"{num:02d}_{CHAKRA_KEYS[num-1]}.jpg")
-    cover_bg=os.path.join(COVERS_DIR,"female_background.jpg" if gender=="female" else "male_background.jpg" if gender=="male" else "female_background.jpg")
+    cover_bg=os.path.join(COVERS_DIR,"female_background.jpg" if gender=="female" else "male_background.jpg" if gender=="male" else "universal_background.jpg")
     map_path=os.path.join(REPORTS_DIR,f"energy_map_{uid}_{rid}.jpg")
     if energy_scores:
         make_energy_map(map_path,energy_scores,num)
@@ -220,7 +220,7 @@ def create_report(uid, name, num, ch, rid, energy_scores=None, sphere_analysis=N
     ]))
     story += [t,Spacer(1,0.45*cm),_card("Ключевая тема", f"{ch['responsibility']} Этот отчёт помогает увидеть тему ведущей чакры вместе с общей картиной энергокарты.",accent)]
     story += [Spacer(1,0.6*cm),Paragraph("<b>Имя клиента:</b> "+_safe(client_name),body),
-              Paragraph("<b>Профиль:</b> "+("женский" if gender=="female" else "мужской" if gender=="male" else "универсальный"),body)]
+              Paragraph("<b>Профиль:</b> персональный, универсальный для женщин и мужчин",body)]
 
     # Leading chakra
     story += [PageBreak(),Paragraph("1. ВЕДУЩАЯ ЧАКРА — ПОДРОБНЫЙ РАЗБОР",title)]
